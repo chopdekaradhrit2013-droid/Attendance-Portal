@@ -1,0 +1,77 @@
+import { useState } from "react";
+import { useStore } from "../store";
+import type { ClassRecord } from "../types";
+import { navigate, pct } from "../utils";
+
+export default function Classes() {
+  const { current, db, createClass, classStats } = useStore();
+  const [open, setOpen] = useState(false);
+  const mine = db.classes.filter((c) => c.professorId === current?.id);
+
+  return (
+    <>
+      <div className="topbar">
+        <div>
+          <h1>My Classes</h1>
+          <p>{mine.length} class{mine.length === 1 ? "" : "es"}</p>
+        </div>
+        <button className="btn" onClick={() => setOpen(true)}>+ Create Class</button>
+      </div>
+      {mine.length === 0 && <div className="panel empty">Create your first class to add students and start attendance.</div>}
+      <div className="grid-cards">
+        {mine.map((c) => {
+          const s = classStats(c.id);
+          return (
+            <button key={c.id} className="class-card" onClick={() => navigate(`/class/${c.id}/students`)}>
+              <h3>{c.name}</h3>
+              <div className="meta">Division {c.division} · {c.academicYear}</div>
+              <p style={{ margin: "10px 0 14px" }}>{c.subject}</p>
+              <div className="row">
+                <span className="pill neutral">{s.totalStudents} students</span>
+                <span className="pill good">{pct(s.average)} avg</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+      {open && (
+        <ClassModal onClose={() => setOpen(false)} onSave={(data) => { createClass(data); setOpen(false); }} />
+      )}
+    </>
+  );
+}
+
+export function ClassModal({
+  onClose,
+  onSave,
+  initial,
+}: {
+  onClose: () => void;
+  onSave: (c: Omit<ClassRecord, "id" | "professorId" | "createdAt">) => void;
+  initial?: ClassRecord;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [division, setDivision] = useState(initial?.division ?? "");
+  const [subject, setSubject] = useState(initial?.subject ?? "");
+  const [academicYear, setAcademicYear] = useState(initial?.academicYear ?? "2026–27");
+  const [meetingTime, setMeetingTime] = useState(initial?.meetingTime ?? "");
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => {
+        e.preventDefault();
+        onSave({ name: name.trim(), division: division.trim(), subject: subject.trim(), academicYear: academicYear.trim(), meetingTime: meetingTime.trim() });
+      }}>
+        <h3>{initial ? "Edit class" : "Create class"}</h3>
+        <div className="field"><label>Class Name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="FY BSc Computer Science" required /></div>
+        <div className="field"><label>Division</label><input value={division} onChange={(e) => setDivision(e.target.value)} placeholder="A" required /></div>
+        <div className="field"><label>Subject</label><input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Computer Networks" required /></div>
+        <div className="field"><label>Academic Year</label><input value={academicYear} onChange={(e) => setAcademicYear(e.target.value)} required /></div>
+        <div className="field"><label>Class time (optional)</label><input value={meetingTime} onChange={(e) => setMeetingTime(e.target.value)} placeholder="10:00 AM" /></div>
+        <div className="actions">
+          <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+          <button className="btn">Save</button>
+        </div>
+      </form>
+    </div>
+  );
+}
