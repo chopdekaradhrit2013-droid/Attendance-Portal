@@ -1,4 +1,16 @@
 export type Status = "present" | "absent";
+export type Role = "professor" | "student";
+
+export interface User {
+  id: string;
+  role: Role;
+  name: string;
+  email: string;
+  passwordHash: string;
+  institution: string;
+  department: string;
+  createdAt: string;
+}
 
 export interface Professor {
   id: string;
@@ -46,6 +58,7 @@ export interface AttendanceRecord {
 }
 
 export interface Database {
+  users: User[];
   professors: Professor[];
   classes: ClassRecord[];
   students: Student[];

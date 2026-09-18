@@ -33,6 +33,9 @@ export default function App() {
     if (current && (path === "/signin" || path === "/signup")) {
       navigate("/dashboard");
     }
+    if (current?.role === "student" && path.startsWith("/reports")) {
+      navigate("/dashboard");
+    }
   }, [current, path]);
 
   if (path === "/signin") return <Auth mode="in" />;
