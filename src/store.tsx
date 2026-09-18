@@ -1,28 +1,38 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import type { AttendanceRecord, AttendanceSession, ClassRecord, Database, Professor, Status, Student, StudentStats } from "./types";
+import type { AttendanceRecord, AttendanceSession, ClassRecord, Database, Role, Status, Student, StudentStats, User } from "./types";
 import { todayISO, uid } from "./utils";
 
 const DB_KEY = "attendance-portal-db-v1";
 const SESSION_KEY = "attendance-portal-session-v1";
-const emptyDb = (): Database => ({ professors: [], classes: [], students: [], sessions: [], records: [] });
+const emptyDb = (): Database => ({ users: [], professors: [], classes: [], students: [], sessions: [], records: [] });
+
+function migrate(raw: Partial<Database>): Database {
+  const db = { ...emptyDb(), ...raw, users: raw.users ?? [] };
+  if (db.users.length === 0 && (raw.professors?.length ?? 0) > 0) {
+    db.users = raw.professors!.map((p) => ({ ...p, role: "professor" as const }));
+  }
+  return db;
+}
 
 function loadDb(): Database {
   try {
     const raw = localStorage.getItem(DB_KEY);
     if (!raw) return emptyDb();
-    return { ...emptyDb(), ...JSON.parse(raw) };
+    return migrate(JSON.parse(raw));
   } catch {
     return emptyDb();
   }
 }
 
+export type SignUpInput = { role: Role; name: string; email: string; passwordHash: string; institution: string; department: string };
+
 interface StoreValue {
   db: Database;
-  current: Professor | null;
-  signUp: (p: Omit<Professor, "id" | "createdAt">) => string | null;
-  signIn: (email: string, passwordHash: string) => string | null;
+  current: User | null;
+  signUp: (p: SignUpInput) => string | null;
+  signIn: (email: string, passwordHash: string, role: Role) => string | null;
   signOut: () => void;
-  updateProfessor: (patch: Partial<Professor>) => void;
+  updateUser: (patch: Partial<User>) => void;
   createClass: (c: Omit<ClassRecord, "id" | "professorId" | "createdAt">) => ClassRecord;
   updateClass: (id: string, patch: Partial<ClassRecord>) => void;
   deleteClass: (id: string) => void;
@@ -34,6 +44,9 @@ interface StoreValue {
   classStats: (classId: string) => { totalStudents: number; sessions: number; average: number; below75: number; presentTotal: number; absentTotal: number };
   studentStats: (classId: string) => StudentStats[];
   overview: () => { totalStudents: number; totalClasses: number; average: number; below75: number };
+  myRoster: () => Student[];
+  myClasses: () => ClassRecord[];
+  myOverview: () => { classes: number; present: number; absent: number; percentage: number };
 }
 
 const Ctx = createContext<StoreValue | null>(null);
@@ -42,29 +55,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [db, setDb] = useState<Database>(() => loadDb());
   const [userId, setUserId] = useState<string | null>(() => localStorage.getItem(SESSION_KEY));
   useEffect(() => { localStorage.setItem(DB_KEY, JSON.stringify(db)); }, [db]);
-  const current = useMemo(() => db.professors.find((p) => p.id === userId) ?? null, [db.professors, userId]);
+  const current = useMemo(() => db.users.find((p) => p.id === userId) ?? null, [db.users, userId]);
   const setAndPersistUser = (id: string | null) => {
     setUserId(id);
     if (id) localStorage.setItem(SESSION_KEY, id);
     else localStorage.removeItem(SESSION_KEY);
   };
   const signUp: StoreValue["signUp"] = (p) => {
-    if (db.professors.some((x) => x.email.toLowerCase() === p.email.toLowerCase())) return "An account with this email already exists.";
-    const prof: Professor = { ...p, id: uid("prof"), createdAt: new Date().toISOString() };
-    setDb((d) => ({ ...d, professors: [...d.professors, prof] }));
-    setAndPersistUser(prof.id);
+    if (db.users.some((x) => x.email.toLowerCase() === p.email.toLowerCase())) return "An account with this email already exists.";
+    const user: User = { ...p, id: uid(p.role === "student" ? "stuacc" : "prof"), createdAt: new Date().toISOString() };
+    setDb((d) => ({ ...d, users: [...d.users, user], professors: user.role === "professor" ? [...d.professors, { ...user }] : d.professors }));
+    setAndPersistUser(user.id);
     return null;
   };
-  const signIn: StoreValue["signIn"] = (email, passwordHash) => {
-    const prof = db.professors.find((x) => x.email.toLowerCase() === email.toLowerCase());
-    if (!prof || prof.passwordHash !== passwordHash) return "Invalid email or password.";
-    setAndPersistUser(prof.id);
+  const signIn: StoreValue["signIn"] = (email, passwordHash, role) => {
+    const user = db.users.find((x) => x.email.toLowerCase() === email.toLowerCase());
+    if (!user || user.passwordHash !== passwordHash) return "Invalid email or password.";
+    if (user.role !== role) {
+      return user.role === "professor"
+        ? "This email is registered as a professor. Choose Professor to sign in."
+        : "This email is registered as a student. Choose Student to sign in.";
+    }
+    setAndPersistUser(user.id);
     return null;
   };
   const signOut = () => setAndPersistUser(null);
-  const updateProfessor: StoreValue["updateProfessor"] = (patch) => {
+  const updateUser: StoreValue["updateUser"] = (patch) => {
     if (!userId) return;
-    setDb((d) => ({ ...d, professors: d.professors.map((p) => (p.id === userId ? { ...p, ...patch } : p)) }));
+    setDb((d) => ({
+      ...d,
+      users: d.users.map((p) => (p.id === userId ? { ...p, ...patch } : p)),
+      professors: d.professors.map((p) => (p.id === userId ? { ...p, ...patch } : p)),
+    }));
   };
   const createClass: StoreValue["createClass"] = (c) => {
     const rec: ClassRecord = { ...c, id: uid("cls"), professorId: userId!, createdAt: new Date().toISOString() };
@@ -160,7 +182,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const withData = allStats.filter((s) => s.total > 0);
     return { totalStudents: allStats.length, totalClasses: classes.length, average: withData.length ? withData.reduce((a, s) => a + s.percentage, 0) / withData.length : 0, below75: withData.filter((s) => s.percentage < 75).length };
   }, [db.classes, studentStats, userId]);
-  const value: StoreValue = { db, current, signUp, signIn, signOut, updateProfessor, createClass, updateClass, deleteClass, addStudent, updateStudent, removeStudent, importStudents, saveAttendance, classStats, studentStats, overview };
+  const myRoster = useCallback(() => {
+    if (!current || current.role !== "student") return [];
+    const email = current.email.trim().toLowerCase();
+    return db.students.filter((s) => s.email.trim().toLowerCase() === email);
+  }, [current, db.students]);
+  const myClasses = useCallback(() => {
+    const ids = new Set(myRoster().map((s) => s.classId));
+    return db.classes.filter((c) => ids.has(c.id));
+  }, [db.classes, myRoster]);
+  const myOverview = useCallback(() => {
+    const roster = myRoster();
+    let present = 0;
+    let absent = 0;
+    roster.forEach((stu) => {
+      const stats = studentStats(stu.classId).find((s) => s.student.id === stu.id);
+      if (!stats) return;
+      present += stats.present;
+      absent += stats.absent;
+    });
+    const total = present + absent;
+    return { classes: myClasses().length, present, absent, percentage: total === 0 ? 0 : (present / total) * 100 };
+  }, [myClasses, myRoster, studentStats]);
+  const value: StoreValue = { db, current, signUp, signIn, signOut, updateUser, createClass, updateClass, deleteClass, addStudent, updateStudent, removeStudent, importStudents, saveAttendance, classStats, studentStats, overview, myRoster, myClasses, myOverview };
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
