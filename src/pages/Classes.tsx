@@ -4,10 +4,41 @@ import type { ClassRecord } from "../types";
 import { navigate, pct } from "../utils";
 
 export default function Classes() {
-  const { current, db, createClass, classStats } = useStore();
+  const { current, db, createClass, classStats, myClasses, myRoster, studentStats } = useStore();
   const [open, setOpen] = useState(false);
+  if (current?.role === "student") {
+    const mine = myClasses();
+    const roster = myRoster();
+    return (
+      <>
+        <div className="topbar">
+          <div>
+            <h1>My Subjects</h1>
+            <p>{mine.length} class{mine.length === 1 ? "" : "es"} linked to {current.email}</p>
+          </div>
+        </div>
+        {mine.length === 0 && <div className="panel empty">Nothing here yet. Your professor must add your email to a class roster.</div>}
+        <div className="grid-cards">
+          {mine.map((c) => {
+            const me = roster.find((s) => s.classId === c.id);
+            const stat = me ? studentStats(c.id).find((s) => s.student.id === me.id) : null;
+            return (
+              <button key={c.id} className="class-card" onClick={() => navigate(`/class/${c.id}/mine`)}>
+                <h3>{c.subject}</h3>
+                <div className="meta">{c.name} · Division {c.division}</div>
+                <p style={{ margin: "10px 0 14px" }}>{me ? `Roll ${me.rollNo}` : "Linked by email"}</p>
+                <div className="row">
+                  <span className="pill neutral">{stat?.total ?? 0} sessions</span>
+                  <span className={`pill ${stat && stat.total && stat.percentage < 75 ? "warn" : "good"}`}>{stat && stat.total ? pct(stat.percentage) : "No data"}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
   const mine = db.classes.filter((c) => c.professorId === current?.id);
-
   return (
     <>
       <div className="topbar">
@@ -34,22 +65,12 @@ export default function Classes() {
           );
         })}
       </div>
-      {open && (
-        <ClassModal onClose={() => setOpen(false)} onSave={(data) => { createClass(data); setOpen(false); }} />
-      )}
+      {open && <ClassModal onClose={() => setOpen(false)} onSave={(data) => { createClass(data); setOpen(false); }} />}
     </>
   );
 }
 
-export function ClassModal({
-  onClose,
-  onSave,
-  initial,
-}: {
-  onClose: () => void;
-  onSave: (c: Omit<ClassRecord, "id" | "professorId" | "createdAt">) => void;
-  initial?: ClassRecord;
-}) {
+export function ClassModal({ onClose, onSave, initial }: { onClose: () => void; onSave: (c: Omit<ClassRecord, "id" | "professorId" | "createdAt">) => void; initial?: ClassRecord }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [division, setDivision] = useState(initial?.division ?? "");
   const [subject, setSubject] = useState(initial?.subject ?? "");
