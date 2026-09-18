@@ -9,17 +9,44 @@ export default function ClassPage({ path }: { path: string }) {
   const classId = parts[1];
   const tab = parts[2] || "students";
   const extra = parts[3];
-  const { db, classStats, deleteClass } = useStore();
+  const { current, db, classStats, deleteClass, myRoster, studentStats } = useStore();
   const cls = db.classes.find((c) => c.id === classId);
   if (!cls) return <div className="panel">Class not found.</div>;
+  if (current?.role === "student") {
+    const me = myRoster().find((s) => s.classId === cls.id);
+    if (!me) return <div className="panel">You are not enrolled in this class.</div>;
+    const stat = studentStats(cls.id).find((s) => s.student.id === me.id);
+    const sessions = db.sessions.filter((s) => s.classId === cls.id).slice().sort((a, b) => b.date.localeCompare(a.date));
+    return (
+      <>
+        <div className="topbar"><div><h1>{cls.subject}</h1><p>{cls.name} · Division {cls.division} · Roll {me.rollNo}</p></div></div>
+        <div className="cards">
+          <div className="stat"><span>My Attendance</span><b>{stat && stat.total ? pct(stat.percentage) : "—"}</b></div>
+          <div className="stat"><span>Present</span><b>{stat?.present ?? 0}</b></div>
+          <div className="stat"><span>Absent</span><b>{stat?.absent ?? 0}</b></div>
+          <div className="stat"><span>Sessions</span><b>{stat?.total ?? 0}</b></div>
+        </div>
+        <section className="panel">
+          <h2>My record</h2>
+          {sessions.length === 0 && <div className="empty">No sessions recorded yet.</div>}
+          {sessions.map((s) => {
+            const rec = db.records.find((r) => r.sessionId === s.id && r.studentId === me.id);
+            return (
+              <div className="hist-item" key={s.id}>
+                <div><strong>{formatDate(s.date)}</strong><div className="meta">{cls.subject} · only your mark</div></div>
+                {rec ? <span className={`pill ${rec.status === "present" ? "good" : "warn"}`}>{rec.status === "present" ? "Present" : "Absent"}</span> : <span className="pill neutral">Not marked</span>}
+              </div>
+            );
+          })}
+        </section>
+      </>
+    );
+  }
   const stats = classStats(cls.id);
   return (
     <>
       <div className="topbar">
-        <div>
-          <h1>{cls.subject}</h1>
-          <p>{cls.name} · Division {cls.division} · {cls.academicYear}</p>
-        </div>
+        <div><h1>{cls.subject}</h1><p>{cls.name} · Division {cls.division} · {cls.academicYear}</p></div>
         <button className="btn ghost" onClick={() => { if (confirm("Delete this class and its attendance?")) { deleteClass(cls.id); navigate("/classes"); } }}>Delete class</button>
       </div>
       <div className="cards">
@@ -74,9 +101,7 @@ function StudentsTab({ cls }: { cls: ClassRecord }) {
           <tbody>
             {stats.map((s) => (
               <tr key={s.student.id}>
-                <td>{s.student.rollNo}</td>
-                <td>{s.student.fullName}</td>
-                <td>{s.total ? pct(s.percentage) : "—"}</td>
+                <td>{s.student.rollNo}</td><td>{s.student.fullName}</td><td>{s.total ? pct(s.percentage) : "—"}</td>
                 <td>{s.total === 0 ? <span className="pill neutral">No data</span> : s.percentage < 75 ? <span className="pill warn">Warning</span> : <span className="pill good">Good</span>}</td>
                 <td>
                   <button className="btn ghost" onClick={() => setModal(s.student)}>Edit</button>{" "}
@@ -119,7 +144,7 @@ function StudentModal({ initial, onClose, onSave }: { initial: Partial<Student>;
         <h3>{initial.id ? "Edit student" : "Add student"}</h3>
         <div className="field"><label>Roll number</label><input value={rollNo} onChange={(e) => setRollNo(e.target.value)} required /></div>
         <div className="field"><label>Full name</label><input value={fullName} onChange={(e) => setFullName(e.target.value)} required /></div>
-        <div className="field"><label>Email (optional)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
+        <div className="field"><label>Email (needed for student login)</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></div>
         <div className="actions"><button type="button" className="btn ghost" onClick={onClose}>Cancel</button><button className="btn">Save</button></div>
       </form>
     </div>
